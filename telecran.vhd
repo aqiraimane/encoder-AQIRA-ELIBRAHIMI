@@ -1,0 +1,124 @@
+
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+library pll;
+use pll.all;
+
+entity telecran is
+    port (
+        -- FPGA
+        i_clk_50 : in std_logic;
+
+        -- HDMI
+        io_hdmi_i2c_scl : inout std_logic;
+        io_hdmi_i2c_sda : inout std_logic;
+        o_hdmi_tx_clk   : out std_logic;
+        o_hdmi_tx_d     : out std_logic_vector(23 downto 0);
+        o_hdmi_tx_de    : out std_logic;
+        o_hdmi_tx_hs    : out std_logic;
+        i_hdmi_tx_int   : in std_logic;
+        o_hdmi_tx_vs    : out std_logic;
+
+        -- Reset
+        i_rst_n : in std_logic;
+
+        -- LEDs
+        o_leds      : out std_logic_vector(9 downto 0);
+        o_de10_leds : out std_logic_vector(7 downto 0);
+
+        -- Codeurs
+        i_left_ch_a  : in std_logic;
+        i_left_ch_b  : in std_logic;
+        i_left_pb    : in std_logic;
+        i_right_ch_a : in std_logic;
+        i_right_ch_b : in std_logic;
+        i_right_pb   : in std_logic
+    );
+end entity telecran;
+
+architecture rtl of telecran is
+
+    component I2C_HDMI_Config
+        port (
+            iCLK        : in std_logic;
+            iRST_N      : in std_logic;
+            I2C_SCLK    : out std_logic;
+            I2C_SDAT    : inout std_logic;
+            HDMI_TX_INT : in std_logic
+        );
+    end component;
+
+    component pll
+        port (
+            refclk   : in std_logic;
+            rst      : in std_logic;
+            outclk_0 : out std_logic;
+            locked   : out std_logic
+        );
+    end component;
+
+    signal s_clk_27 : std_logic;
+    signal s_rst_n  : std_logic;
+
+    signal s_x_counter : natural range 0 to 719;
+    signal s_y_counter : natural range 0 to 479;
+
+begin
+
+    -- Horloge HDMI 27 MHz
+    o_hdmi_tx_clk <= s_clk_27;
+
+    -- Controleur HDMI de l'autre groupe
+    u_hdmi_controler : entity work.hdmi_controler
+        port map (
+            i_clk           => s_clk_27,
+            i_rst_n         => s_rst_n,
+
+            o_hdmi_hs       => o_hdmi_tx_hs,
+            o_hdmi_vs       => o_hdmi_tx_vs,
+            o_hdmi_de       => o_hdmi_tx_de,
+
+            o_pixel_en      => open,
+            o_pixel_address => open,
+
+            o_x_counter     => s_x_counter,
+            o_y_counter     => s_y_counter
+        );
+
+    -- Generation des couleurs
+    -- Rouge = X, Vert = Y, Bleu = 0
+    o_hdmi_tx_d(23 downto 16) <=
+        std_logic_vector(to_unsigned(s_x_counter, 8));
+
+    o_hdmi_tx_d(15 downto 8) <=
+        std_logic_vector(to_unsigned(s_y_counter, 8));
+
+    o_hdmi_tx_d(7 downto 0) <=
+        (others => '0');
+
+    -- LEDs
+    o_leds <= (others => '0');
+    o_de10_leds <= (others => '0');
+
+    -- PLL : 50 MHz vers 27 MHz
+    pll0 : component pll
+        port map (
+            refclk   => i_clk_50,
+            rst      => not(i_rst_n),
+            outclk_0 => s_clk_27,
+            locked   => s_rst_n
+        );
+
+    -- Configuration HDMI ADV7513
+    I2C_HDMI_Config0 : component I2C_HDMI_Config
+        port map (
+            iCLK        => i_clk_50,
+            iRST_N      => i_rst_n,
+            I2C_SCLK    => io_hdmi_i2c_scl,
+            I2C_SDAT    => io_hdmi_i2c_sda,
+            HDMI_TX_INT => i_hdmi_tx_int
+        );
+
+end architecture rtl;
